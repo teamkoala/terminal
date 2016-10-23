@@ -20,24 +20,32 @@
     
 
         tetra.weblet.on('hide', function () {
-            if (poller.getTimerID()) {
-                window.clearTimeout(poller.getTimerID());
+            if (self.poller.getTimerID()) {
+                window.clearTimeout(self.poller.getTimerID());
+                self.overlay.removeClass('hidden');
             }
         });
 
         tetra.weblet.on('show', function () {
-            if (poller.getTimerID()) {
-                poller.resume();
+            if (self.poller.getTimerID()) {
+                self.poller.resume();
             }
         });
     }
 
 
     DOMController.prototype.makeTransaction = function(){
+        var self = this;
         var total = this.poller.getOrderTotal();
         var transaction = new Transaction(total);
         transaction.make();
         this.overlay.toggleClass('hidden');
+        window.clearTimeout(self.poller.getTimerID());
+        resetTransactions().then(function(){
+            self.poller = new Poller();
+            self.poller.onupdate = self.update.bind(self);
+
+        });
 
     }
 
@@ -53,28 +61,26 @@
             self.addLineItem(value.line_item)
         });
         
-        this.overlay.toggleClass('hidden');
-
+        
+        this.overlay.addClass('hidden');
 
     }
 
     DOMController.prototype.addLineItem = function(item){
         this.current
-        this.order.append('<tr><td class="description">' + item.name + '</td><td class="price">' + item.price + '</td></tr>');
+        this.order.append('<tr><td class="description">' + item.pretty_name + '</td><td class="price">$' + (item.price/100).toFixed( 2 ) + '</td></tr>');
     }
+
+    
 
 
     $(function () {
-
-        $.ajax({
-            url: 'https://rocky-sands-79934.herokuapp.com/orders/destroy/',
-            type: 'DELETE',
-            success: function(result) {
-               window.setTimeout(function(){
+        resetTransactions().then(function(){
+            window.setTimeout(function(){
                 new DOMController();
             }, 15000)
-            }
-        });
+        })
+        
         
     });
 
@@ -85,7 +91,7 @@ function Poller(){
     var self = this;
 
     ORDERS_ENDPOINT = 'https://rocky-sands-79934.herokuapp.com/orders.json';
-    POLL_TIME = 15 /* Seconds */ * 1000 /* MS */;
+    POLL_TIME = 5 /* Seconds */ * 1000 /* MS */;
 
     this.items = [];
     this.currentOrder = null;
@@ -118,22 +124,19 @@ Poller.prototype.process_ = function(data){
     console.log(data);
     var self = this;
 
-    var last = data && data.orders ? data.orders[data.orders.length -1] : null;
+    var last = data ? data.orders[data.orders.length -1] : null;
 
-    var isNoOrder = !this.currentOrder;
-    var isNewOrder = this.currentOrder && this.currentOrder.id !== last.id;
-    var isStateChanged = this.currentOrder && this.currentOrder.state !== last.state;
-    var isItemsChanged = this.currentOrder && this.currentOrder.line_items.length !== last.line_items.length;
-    var isOrderFinished = this.currentOrder && this.currentOrder.finished;
+    var isNoOrder = !this.currentOrder  && data.orders.length > 0;
+    var isNewOrder = this.currentOrder && last && this.currentOrder.id !== last.id;
+    var isStateChanged = this.currentOrder && last && this.currentOrder.state !== last.state;
+    var isItemsChanged = this.currentOrder && last && this.currentOrder.line_items.length !== last.line_items.length;
+    var isOrderFinished = this.currentOrder && last.finished;
 
     if(isNoOrder || isNewOrder || isStateChanged || isItemsChanged || isOrderFinished) {
         this.currentOrder = last;
         this.onupdate(this.currentOrder);
-    }
+    }   
 
-    
-
-    
     this.timerId = window.setTimeout(function(){
         self.poll();
     }, POLL_TIME); 
@@ -153,7 +156,18 @@ Poller.prototype.getTimerID = function(){
 }
 
 /** Overwrite this method */
-Poller.prototype.onupdate = function(order){
+Poller.prototype.onupdate = function (order) {
     console.log('Updating', this.currentOrder);
 }
 
+function resetTransactions() {
+    return new Promise(function (resolve) {
+        $.ajax({
+            url: 'https://rocky-sands-79934.herokuapp.com/orders/destroy/',
+            type: 'DELETE',
+            success: function (result) {
+                resolve();
+            }
+        });
+    });
+};
